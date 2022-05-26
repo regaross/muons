@@ -19,6 +19,7 @@ A module for simulating muons underneath SNOLAB's overburden for nEXO's Outer De
 #                                               }
 #################################################
 
+from re import L
 import numpy as np
 import time
 #from stl import mesh
@@ -122,7 +123,8 @@ class Muon:
 
         x = np.sin(self.zenith)*np.cos(self.azimuth)
         y = np.sin(self.zenith)*np.sin(self.azimuth)
-        z = np.cos(self.zenith)
+        # Muons are going DOWN
+        z = -np.cos(self.zenith)
 
         return (x,y,z)
 
@@ -265,6 +267,23 @@ def generate_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen
 
     return muons
 
+
+def intersecting_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen_offset=0) -> np.ndarray:
+    ''' Does the same as generate_muons, but returns only muons that intersect the provided outer detector'''
+
+    at_a_time = int(how_many/2)+1
+    muon_list = []
+
+    while len(muon_list) < how_many:
+        temp_muons = generate_muons(at_a_time, outer_detector, gen_radius, gen_offset)
+        for mu in temp_muons:
+            if hits_detector(mu, outer_detector):
+                muon_list.append(mu)
+
+    return np.array(muon_list)
+    
+
+
 def intersection_points(muon, outer_detector = OuterDetector(), labels = True, tolerance = 0.001):
     ''' A function for analytically determining the intersection points of a muon with an outer detector cylinder.  '''
     
@@ -352,6 +371,10 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
         return (entryPoint, entryLabel, exitPoint, exitLabel)
     else:
         return (entryPoint, exitPoint)
+
+def hits_detector(muon, outer_detector=OuterDetector()) -> bool:
+    ''' Returns True if the muon has intersection points with the given detector '''
+    return (type(intersection_points(muon, outer_detector, labels= False)) is not bool)
 
 
 def path_length(muon, outer_detector = OuterDetector(), cryostat = False):
