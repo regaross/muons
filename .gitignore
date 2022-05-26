@@ -1,2 +1,6 @@
 *.json
+*checkpoint*
+*~
+*.png
+*cache*
 *.log
