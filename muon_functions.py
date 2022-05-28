@@ -287,7 +287,7 @@ def generate_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen
     for i in range(how_many):
         muons[i] = Muon(zeniths[i], azimuths[i], energies[i], (initial_x[i], initial_y[i], initial_z[i]))
 
-    return muons
+    return muons[:how_many]
 
 
 def intersecting_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen_offset=0) -> np.ndarray:
@@ -302,7 +302,7 @@ def intersecting_muons(how_many, outer_detector = OuterDetector(), gen_radius=0,
             if hits_detector(mu, outer_detector):
                 muon_list.append(mu)
 
-    return np.array(muon_list)
+    return np.array(muon_list)[:how_many]
     
 
 
@@ -399,26 +399,31 @@ def hits_detector(muon, outer_detector=OuterDetector()) -> bool:
     return (type(intersection_points(muon, outer_detector, labels= False)) is not bool)
 
 
-def path_length(muon, outer_detector = OuterDetector(), ignore_cover_gas = False, cryostat = False):
+def path_length(muon, outer_detector = OuterDetector(), labels=True, ignore_cover_gas=True, ignore_cryostat=True):
     ''' Returns the path length of a muon through the Outer Detector. False if it doesn't hit.'''
 
-    points = intersection_points(muon, outer_detector, labels = False)
+    points = intersection_points(muon, outer_detector)
     path_length = 0
 
     if type(points) is not bool:
-        x = points[1][0] - points[0][0]
-        y = points[1][1] - points[0][1]
-        z = points[1][2] - points[0][2]
+        x = points[2][0] - points[0][0]
+        y = points[2][1] - points[0][1]
+        z = points[2][2] - points[0][2]
 
         path_length = np.sqrt(x**2 + y**2 + z**2)
 
-        if ignore_cover_gas and points[0][2] > (outer_detector.fill_height - outer_detector.height/2):
-            # If we are to subtract the length of the path due to cover gas, we can check if the entrance point lies in that region: z > (fill_height - h/2)
-            vert_side = points[0][2] - (outer_detector.fill_height - outer_detector.height/2) # Vertical comp of cover gas path
-            hori_side = np.tan(muon.zenith)/vert_side   # Horizontal comp of cover gas path
-            path_length = path_length - np.sqrt(hori_side**2 + vert_side**2)
 
-        return path_length
+        z_fill_line = (outer_detector.fill_height - outer_detector.height/2)
+        if ignore_cover_gas and points[0][2] > z_fill_line:
+            # If we are to subtract the length of the path due to cover gas:
+            path_length = path_length - path_through_covergas(muon, outer_detector)
+            
+        if ignore_cryostat: path_length = path_length - path_through_cryostat(muon, outer_detector)
+
+        if path_length < 0: path_length = 0
+
+        if not labels: return path_length
+        else: return (path_length, points[1], points[3])
 
     else:
         return False
@@ -437,8 +442,37 @@ def get_cherenkov(muon, outer_detector = OuterDetector(), ignore_cover_gas = Fal
 
     return (int(total_photons), light_angle)
 
+def path_through_covergas(muon, outer_detector):
+    ''' Returns the pathlength of the muon through the outer_detector cover gas layer'''
+    
+    if not hits_detector(muon, outer_detector): return False
+    
+    mx, my, mz = muon.get_unit_vec()
+    x0, y0, z0 = muon.initial
 
-def path_minus_cryostat(muon, outer_detector, total = True):
+    z_fill_line = (outer_detector.fill_height - outer_detector.height/2)
+    
+    points = intersection_points(muon, outer_detector)
+
+    if points[0][2] > z_fill_line:
+        # If it does actually hit the cover gas region:
+        if points[2][2] > z_fill_line: return 0 # If the muon enters and exits through the cover gas
+
+        else:
+            z_path = points[0][2] - z_fill_line
+            t = (z_fill_line - z0)/mz
+            x_exit = mx*t + x0
+            y_exit = my*t + y0
+
+            x_path = points[0][0] - x_exit
+            y_path = points[0][1] - y_exit
+
+            path_through_covergas = np.sqrt(x_path**2 + y_path**2 + z_path**2)
+
+    return path_through_covergas
+
+
+def path_through_cryostat(muon, outer_detector):
     ''' Returns the pathlength through the Outer Detector without the contribution of the cryostat'''
 
     if not hits_detector(muon, outer_detector): return False
@@ -462,8 +496,7 @@ def path_minus_cryostat(muon, outer_detector, total = True):
 
     if det_squared < 0:
         # Muon doesn't go through Cryostat
-        if total: return path_length(muon, outer_detector)
-        else: return 0
+        return 0
 
     # If the muon does, in fact, hit the OC...
 
@@ -476,9 +509,7 @@ def path_minus_cryostat(muon, outer_detector, total = True):
 
     dist = np.sqrt(np.sum(diff**2))
 
-    if total: return dist
-    else: return path_length(muon, outer_detector) - dist
-
+    return dist
 
 
 #################################################
