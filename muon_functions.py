@@ -438,6 +438,49 @@ def get_cherenkov(muon, outer_detector = OuterDetector(), ignore_cover_gas = Fal
     return (int(total_photons), light_angle)
 
 
+def path_minus_cryostat(muon, outer_detector, total = True):
+    ''' Returns the pathlength through the Outer Detector without the contribution of the cryostat'''
+
+    if not hits_detector(muon, outer_detector): return False
+
+    oc = outer_detector.outer_cryo
+    oc_radius = oc.radius
+
+    mx, my, mz = muon.get_unit_vec()
+    x0, y0, z0 = muon.initial
+    ocx, ocy, ocz = oc.position
+
+    A_x, B_x, C_x = ((mx**2),(2*(mx*x0 - mx*ocx)),(x0**2 + ocx**2 - x0*ocx))
+    A_y, B_y, C_y = ((my**2),(2*(my*y0 - my*ocy)),(y0**2 + ocy**2 - y0*ocy))
+    A_z, B_z, C_z = ((mz**2),(2*(mz*z0 - mz*ocz)),(z0**2 + ocz**2 - z0*ocz))
+
+    A = A_x + A_y + A_z
+    B = B_x + B_y + B_z
+    C = C_x + C_y + C_z - oc_radius**2
+
+    det_squared = B**2 - 4*A*C
+
+    if det_squared < 0:
+        # Muon doesn't go through Cryostat
+        if total: return path_length(muon, outer_detector)
+        else: return 0
+
+    # If the muon does, in fact, hit the OC...
+
+    t_one = (-B + np.sqrt(det_squared))/2
+    t_two = (-B - np.sqrt(det_squared))/2
+
+    point_one = np.array([mx*t_one + x0, my*t_one + y0, mx*t_one + z0])
+    point_two = np.array([mx*t_two + x0, my*t_two + y0, mx*t_two + z0])
+    diff = point_one - point_two
+
+    dist = np.sqrt(np.sum(diff**2))
+
+    if total: return dist
+    else: return path_length(muon, outer_detector) - dist
+
+
+
 #################################################
 #                   PLOTTING                     }
 #                  FUNCTIONS                     }
