@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-__version__ = 2.2
+__version__ = 2.3
+Last_Updated = 'May 28, 2022'
 __author__ = 'Regan Ross'
 
 '''
@@ -19,7 +20,6 @@ A module for simulating muons underneath SNOLAB's overburden for nEXO's Outer De
 #                                               }
 #################################################
 
-from re import L
 import numpy as np
 import time
 #from stl import mesh
@@ -39,6 +39,9 @@ c = 299792458           # [m/s]
 alpha = 7.297353e-3     # Fine structure constant
 R5912_min = 300e-9      # m     Min detectable wavelength for PMT
 R5912_max = 650e-9      # m     Max detectable wavelength for PMT
+mu_rest_mass_kg = 1.8835e-28   # [kg]
+mu_rest_mass_MeV = 105.66      # [MeV]
+elementary_charge = 1.60218e-19        # [C]
 
 # nEXO OUTER DETECTOR PARAMETERS
 OD_RADIUS = 6.1722      # m
@@ -352,16 +355,16 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
     entryLabel = ''
     if xtop**2 + ytop**2 <= detRadius**2:
         # Hits top
-        entryPoint = (xtop, ytop, detHeight/2)
+        entryPoint = np.array([xtop, ytop, detHeight/2])
         entryLabel = 'TOP'
     elif qhighCheck < (detRadius + tolerance)**2 and qhighCheck > (detRadius - tolerance)**2 and zhigh**2 < (detHeight/2)**2:
         # Hits the side at the higher z point
-        entryPoint = (mx*qhigh + x0, my*qhigh + y0, zhigh)
+        entryPoint = np.array([mx*qhigh + x0, my*qhigh + y0, zhigh])
         entryLabel = 'SIDE'
         qhigh = False
     elif qlowCheck < (detRadius + tolerance)**2 and qlowCheck > (detRadius - tolerance)**2 and zlow**2 < (detHeight/2)**2:
         # Hits the side at the lower z point
-        entryPoint = (mx*qlow + x0, my*qlow + y0, zlow)
+        entryPoint = np.array([mx*qlow + x0, my*qlow + y0, zlow])
         entryLabel = 'SIDE'
         qlow = False
 
@@ -375,15 +378,15 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
         # EXIT POINT POSSIBILITIES
         if xbottom**2 + ybottom**2 <= detRadius**2:
             # Hits the bottom of the cylinder
-            exitPoint = (xbottom, ybottom, -detHeight/2)
+            exitPoint = np.array([xbottom, ybottom, -detHeight/2])
             exitLabel = 'BOT'
 
         elif qhighCheck < (detRadius + tolerance)**2 and qhighCheck > (detRadius - tolerance)**2 and zhigh**2 < (detHeight/2)**2 and type(qhigh) is float:
-            exitPoint = (mx*qhigh + x0, my*qhigh + y0, zhigh)
+            exitPoint = np.array([mx*qhigh + x0, my*qhigh + y0, zhigh])
             exitLabel = 'SIDE'
 
         elif qlowCheck < (detRadius + tolerance)**2 and qlowCheck > (detRadius - tolerance)**2 and zlow**2 < (detHeight/2)**2 and type(qlow) is float:
-            exitPoint = (mx*qlow + x0, my*qlow + y0, zlow)
+            exitPoint = np.array([mx*qlow + x0, my*qlow + y0, zlow])
             exitLabel = 'SIDE'
     
     if type(entryPoint) is bool:
@@ -392,7 +395,7 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
     elif labels:
         return (entryPoint, entryLabel, exitPoint, exitLabel)
     else:
-        return (entryPoint, exitPoint)
+        return np.array([entryPoint, exitPoint])
 
 def hits_detector(muon, outer_detector=OuterDetector()) -> bool:
     ''' Returns True if the muon has intersection points with the given detector '''
@@ -428,7 +431,7 @@ def path_length(muon, outer_detector = OuterDetector(), labels=True, ignore_cove
     else:
         return False
 
-def get_cherenkov(muon, outer_detector = OuterDetector(), ignore_cover_gas = False, photons_per_meter = False):
+def get_cherenkov(muon, outer_detector = OuterDetector(), photons_per_meter = False):
     ''' Returns a cherenkov light cone for the provided muon through the provided detector'''
     speed = c*np.sqrt(1-(muon.rest_mass_MeV/(1000*muon.energy + muon.rest_mass_MeV))**2) # Relativistic Kinetic Energy
     beta = speed/c
@@ -436,11 +439,11 @@ def get_cherenkov(muon, outer_detector = OuterDetector(), ignore_cover_gas = Fal
     N = 2*alpha*np.pi*((1/R5912_min)-(1/R5912_max))*(1-(1/(beta**2*ior_water**2))) # Photons per meter
 
     if not photons_per_meter:
-        total_photons = N*path_length(muon, outer_detector, ignore_cover_gas)
+        total_photons = N*path_length(muon, outer_detector, labels = False, ignore_cover_gas = True, ignore_cryostat = True)
     else:
         total_photons = N
 
-    return (int(total_photons), light_angle)
+    return np.array([int(total_photons), light_angle])
 
 def path_through_covergas(muon, outer_detector):
     ''' Returns the pathlength of the muon through the outer_detector cover gas layer'''
@@ -511,6 +514,46 @@ def path_through_cryostat(muon, outer_detector):
 
     return dist
 
+def one_days_muons(outer_detector = OuterDetector(), gen_offset = 0, gen_radius = 0)-> np.ndarray:
+    '''A function to return an array of one day's worth of random muons through the provided detector
+        using the flux of muons underground at SNOLAB '''
+
+    if gen_offset == 0:
+        gen_offset = outer_detector.height
+    
+    if gen_radius == 0:
+        gen_radius = np.tan(1)*((outer_detector.height/2) + gen_offset + outer_detector.height/2)\
+            + outer_detector.radius
+        
+    gen_area = 10000*np.pi*gen_radius**2 # cm^2
+    one_day = 3600*24 #seconds
+    n_muons = int(SNOLAB_MU_FLUX*gen_area*one_day)
+
+    return intersecting_muons(n_muons)
+    
+
+def convert_muon(muons, outer_detector = OuterDetector())->np.ndarray :
+    '''A function for converting the current muon generation output to that employed by the
+        chroma-simulation framework
+        
+        This code: [zenith, azimuth, x0, y0, z0]
+        New:       [Muon#,Azimuth [rad],Energy [GeV],Entry [m],Exit [m]]'''
+
+    new_muon_list = []
+
+    for i in range(len(muons)):
+        muon_number = i
+        azimuth = muons[i].azimuth
+        energy = muons[i].energy
+        points = intersection_points(muons[i], outer_detector, labels=False)
+        entry = points[0]
+        exit = points[1]
+        muon = np.array([muon_number, azimuth, energy,entry, exit])
+        new_muon_list.append(muon)
+
+    return np.array(new_muon_list)
+
+    
 
 #################################################
 #                   PLOTTING                     }
