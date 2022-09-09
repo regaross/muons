@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
-__version__ = 2.3
-Last_Updated = 'May 28, 2022'
+__version__ = 2.2
 __author__ = 'Regan Ross'
 
 '''
@@ -97,7 +96,7 @@ class OuterDetector:
     '''
 
     def __init__(self, radius=OD_RADIUS, height=OD_HEIGHT, vertical_depth=SNOLAB_DEPTH,\
-         fill_height=OD_HEIGHT-0.6, outer_cryo = OuterCryostat()) -> 'OuterDetector':
+         fill_height=OD_HEIGHT-0.2, outer_cryo = OuterCryostat()) -> 'OuterDetector':
         ''' A basic constructor; see class docstring'''
         self.radius = radius
         self.height = height
@@ -113,14 +112,14 @@ class Muon:
         - azimuth               [rad]
         - energy                [GeV]
         - initial_position      [meters, meters, meters]
-        - rest_mass_kg          [kg]
-        - rest_mass_MeV         [MeV/c^2]
+        - 
     '''
-
-    # Attribute of the class:
+    
+    # Attributes of the class:
     rest_mass_kg = 1.8835e-28   # [kg]
     rest_mass_MeV = 105.66      # [MeV]
     charge = 1.60218e-19        # [C]
+    
 
     def __init__(self, zenith=0, azimuth=0, energy=SNOLAB_MU_E_AVG, initial=(0,0,0)) -> 'Muon':
         ''' A constructor for the muon. Defaults to vertical muon at average SNOLAB energy'''
@@ -138,7 +137,6 @@ class Muon:
 
         x = np.sin(self.zenith)*np.cos(self.azimuth)
         y = np.sin(self.zenith)*np.sin(self.azimuth)
-        # Muons are going DOWN
         z = -np.cos(self.zenith)
 
         return (x,y,z)
@@ -205,18 +203,6 @@ def mei_hime_normed_discrete(zenith_angles, vert_depth = SNOLAB_DEPTH) -> np.nda
     return normed_flux
 
 
-def mei_hime_normed_continuous(zenith_angles, vert_depth = SNOLAB_DEPTH):
-    ''' Returns the normalized through-going muon flux through horizontal surface 
-        for an array of angles "angles" at a specified vertical depth vert_depth in km.w.e
-        NORMALIZED based on the integral, not the discrete array'''
-
-    norm_const = 6.006989507403272e-11 #Integrated from 0 to pi/2
-
-    #Normalizes the distribution function
-    normed_flux = mei_hime_intensity(zenith_angles)*np.cos(zenith_angles)*np.sin(zenith_angles)
-
-    return normed_flux(zenith_angles)/norm_const
-
 def mh_energy_probs(energies, zenith = 0, sample = True):
     from scipy.integrate import quad
     
@@ -232,7 +218,21 @@ def mh_energy_probs(energies, zenith = 0, sample = True):
     else:
         array = prob(energies)/np.sum(prob(energies))
 
-    return array
+    return arra
+
+
+def mei_hime_normed_continuous(zenith_angles, vert_depth = SNOLAB_DEPTH):
+    ''' Returns the normalized through-going muon flux through horizontal surface 
+        for an array of angles "angles" at a specified vertical depth vert_depth in km.w.e
+        NORMALIZED based on the integral, not the discrete array'''
+
+    norm_const = 6.006989507403272e-11 #Integrated from 0 to pi/2
+
+    #Normalizes the distribution function
+    normed_flux = mei_hime_intensity(zenith_angles)*np.cos(zenith_angles)*np.sin(zenith_angles)
+
+    return normed_flux(zenith_angles)/norm_const
+
 
 def gaisser_normed_discrete(energies, zenith):
     ''' Surface muon energy distribution based on Gaisser's formalism '''
@@ -281,33 +281,22 @@ def generate_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen
     
     azimuths = np.random.random(size = how_many)*np.pi*2
 
-    min_E = 0.5 # Must be just slightly above zero for Cherenkov light to work
-    max_E = 10**5
-    energies_sampling = np.linspace(min_E, max_E, sampling_size) #GeV
-    energies = np.random.choice(energies_sampling, p = mh_energy_probs(energies_sampling), size = how_many)
+    # Selecting Energies
+    surface_energy_range = np.linspace(6500, 100000, sampling_size)
+    surface_energies = np.random.choice(surface_energy_range, p = gaisser_normed_discrete(surface_energy_range, 0), size = how_many)
 
+    # Attenuate based on zenith angles
+    b = 0.4 #km.w.e.^-1
+    energies_underground = (surface_energies - SNOLAB_MU_E_AVG*(np.exp(b*np.cos(zeniths)*SNOLAB_DEPTH)-1))/np.exp(b*np.cos(zeniths)*SNOLAB_DEPTH)
+    for e in range(len(energies_underground)): 
+        if energies_underground[e] < 0: energies_underground[e] = 0
+    
+    
     # Instantiate muons
     for i in range(how_many):
-        muons[i] = Muon(zeniths[i], azimuths[i], energies[i], (initial_x[i], initial_y[i], initial_z[i]))
+        muons[i] = Muon(zeniths[i], azimuths[i], energies_underground[i], (initial_x[i], initial_y[i], initial_z[i]))
 
-    return muons[:how_many]
-
-
-def intersecting_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen_offset=0) -> np.ndarray:
-    ''' Does the same as generate_muons, but returns only muons that intersect the provided outer detector'''
-
-    at_a_time = int(how_many/2)+1
-    muon_list = []
-
-    while len(muon_list) < how_many:
-        temp_muons = generate_muons(at_a_time, outer_detector, gen_radius, gen_offset)
-        for mu in temp_muons:
-            if hits_detector(mu, outer_detector):
-                muon_list.append(mu)
-
-    return np.array(muon_list)[:how_many]
-    
-
+    return muons
 
 def intersection_points(muon, outer_detector = OuterDetector(), labels = True, tolerance = 0.001):
     ''' A function for analytically determining the intersection points of a muon with an outer detector cylinder.  '''
@@ -355,16 +344,16 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
     entryLabel = ''
     if xtop**2 + ytop**2 <= detRadius**2:
         # Hits top
-        entryPoint = np.array([xtop, ytop, detHeight/2])
+        entryPoint = (xtop, ytop, detHeight/2)
         entryLabel = 'TOP'
     elif qhighCheck < (detRadius + tolerance)**2 and qhighCheck > (detRadius - tolerance)**2 and zhigh**2 < (detHeight/2)**2:
         # Hits the side at the higher z point
-        entryPoint = np.array([mx*qhigh + x0, my*qhigh + y0, zhigh])
+        entryPoint = (mx*qhigh + x0, my*qhigh + y0, zhigh)
         entryLabel = 'SIDE'
         qhigh = False
     elif qlowCheck < (detRadius + tolerance)**2 and qlowCheck > (detRadius - tolerance)**2 and zlow**2 < (detHeight/2)**2:
         # Hits the side at the lower z point
-        entryPoint = np.array([mx*qlow + x0, my*qlow + y0, zlow])
+        entryPoint = (mx*qlow + x0, my*qlow + y0, zlow)
         entryLabel = 'SIDE'
         qlow = False
 
@@ -378,15 +367,15 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
         # EXIT POINT POSSIBILITIES
         if xbottom**2 + ybottom**2 <= detRadius**2:
             # Hits the bottom of the cylinder
-            exitPoint = np.array([xbottom, ybottom, -detHeight/2])
+            exitPoint = (xbottom, ybottom, -detHeight/2)
             exitLabel = 'BOT'
 
         elif qhighCheck < (detRadius + tolerance)**2 and qhighCheck > (detRadius - tolerance)**2 and zhigh**2 < (detHeight/2)**2 and type(qhigh) is float:
-            exitPoint = np.array([mx*qhigh + x0, my*qhigh + y0, zhigh])
+            exitPoint = (mx*qhigh + x0, my*qhigh + y0, zhigh)
             exitLabel = 'SIDE'
 
         elif qlowCheck < (detRadius + tolerance)**2 and qlowCheck > (detRadius - tolerance)**2 and zlow**2 < (detHeight/2)**2 and type(qlow) is float:
-            exitPoint = np.array([mx*qlow + x0, my*qlow + y0, zlow])
+            exitPoint = (mx*qlow + x0, my*qlow + y0, zlow)
             exitLabel = 'SIDE'
     
     if type(entryPoint) is bool:
@@ -395,10 +384,44 @@ def intersection_points(muon, outer_detector = OuterDetector(), labels = True, t
     elif labels:
         return (entryPoint, entryLabel, exitPoint, exitLabel)
     else:
-        return np.array([entryPoint, exitPoint])
+        return (entryPoint, exitPoint)
 
-def hits_detector(muon, outer_detector=OuterDetector()) -> bool:
-    ''' Returns True if the muon has intersection points with the given detector '''
+
+def path_length(muon, outer_detector = OuterDetector(), cryostat = False):
+    ''' Returns the path length of a muon through the Outer Detector. False if it doesn't hit.'''
+
+    points = intersection_points(muon, outer_detector, labels = False)
+    path_length = 0
+
+    if type(points) is not bool:
+        x = points[1][0] - points[0][0]
+        y = points[1][1] - points[0][1]
+        z = points[1][2] - points[0][2]
+
+        path_length = np.sqrt(x**2 + y**2 + z**2)
+
+        return path_length
+
+    else:
+        return False
+    
+    
+def intersecting_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen_offset=0) -> np.ndarray:
+    ''' Does the same as generate_muons, but returns only muons that intersect the provided outer detector'''
+
+    at_a_time = int(how_many/2)+1
+    muon_list = []
+
+    while len(muon_list) < how_many:
+        temp_muons = generate_muons(at_a_time, outer_detector, gen_radius, gen_offset)
+        for mu in temp_muons:
+            if hits_detector(mu, outer_detector):
+                muon_list.append(mu)
+
+    return np.array(muon_list)[:how_many]
+
+def hits_detector(muon, outer_detector) -> bool:
+    ''' Returns True if the muon intersects the detector, False otherwise'''
     return (type(intersection_points(muon, outer_detector, labels= False)) is not bool)
 
 
@@ -431,20 +454,8 @@ def path_length(muon, outer_detector = OuterDetector(), labels=True, ignore_cove
     else:
         return False
 
-def get_cherenkov(muon, outer_detector = OuterDetector(), photons_per_meter = False):
-    ''' Returns a cherenkov light cone for the provided muon through the provided detector'''
-    speed = c*np.sqrt(1-(muon.rest_mass_MeV/(1000*muon.energy + muon.rest_mass_MeV))**2) # Relativistic Kinetic Energy
-    beta = speed/c
-    light_angle = np.arccos(1/(beta*ior_water))
-    N = 2*alpha*np.pi*((1/R5912_min)-(1/R5912_max))*(1-(1/(beta**2*ior_water**2))) # Photons per meter
-
-    if not photons_per_meter:
-        total_photons = N*path_length(muon, outer_detector, labels = False, ignore_cover_gas = True, ignore_cryostat = True)
-    else:
-        total_photons = N
-
-    return np.array([int(total_photons), light_angle])
-
+    
+    
 def path_through_covergas(muon, outer_detector):
     ''' Returns the pathlength of the muon through the outer_detector cover gas layer'''
     
@@ -514,46 +525,21 @@ def path_through_cryostat(muon, outer_detector):
 
     return dist
 
-def one_days_muons(outer_detector = OuterDetector(), gen_offset = 0, gen_radius = 0)-> np.ndarray:
-    '''A function to return an array of one day's worth of random muons through the provided detector
-        using the flux of muons underground at SNOLAB '''
 
-    if gen_offset == 0:
-        gen_offset = outer_detector.height
-    
-    if gen_radius == 0:
-        gen_radius = np.tan(1)*((outer_detector.height/2) + gen_offset + outer_detector.height/2)\
-            + outer_detector.radius
-        
-    gen_area = 10000*np.pi*gen_radius**2 # cm^2
-    one_day = 3600*24 #seconds
-    n_muons = int(SNOLAB_MU_FLUX*gen_area*one_day)
+def get_cherenkov(muon, outer_detector = OuterDetector(), photons_per_meter = False):
+    ''' Returns a cherenkov light cone for the provided muon through the provided detector'''
+    speed = c*np.sqrt(1-(muon.rest_mass_MeV/(1000*muon.energy + muon.rest_mass_MeV))**2) # Relativistic Kinetic Energy
+    beta = speed/c
+    light_angle = np.arccos(1/(beta*ior_water))
+    N = 2*alpha*np.pi*((1/R5912_min)-(1/R5912_max))*(1-(1/(beta**2*ior_water**2))) # Photons per meter
 
-    return intersecting_muons(n_muons)
-    
+    if not photons_per_meter:
+        total_photons = N*path_length(muon, outer_detector, labels = False, ignore_cover_gas = True, ignore_cryostat = True)
+    else:
+        total_photons = N
 
-def convert_muon(muons, outer_detector = OuterDetector())->np.ndarray :
-    '''A function for converting the current muon generation output to that employed by the
-        chroma-simulation framework
-        
-        This code: [zenith, azimuth, x0, y0, z0]
-        New:       [Muon#,Azimuth [rad],Energy [GeV],Entry [m],Exit [m]]'''
+    return np.array([int(total_photons), light_angle])
 
-    new_muon_list = []
-
-    for i in range(len(muons)):
-        muon_number = i
-        azimuth = muons[i].azimuth
-        energy = muons[i].energy
-        points = intersection_points(muons[i], outer_detector, labels=False)
-        entry = points[0]
-        exit = points[1]
-        muon = np.array([muon_number, azimuth, energy,entry, exit])
-        new_muon_list.append(muon)
-
-    return np.array(new_muon_list)
-
-    
 
 #################################################
 #                   PLOTTING                     }
