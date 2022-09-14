@@ -2,6 +2,7 @@
 
 __version__ = 2.2
 __author__ = 'Regan Ross'
+## Last Edited Sept 9, 2022
 
 '''
 muon_functions.py
@@ -218,7 +219,7 @@ def mh_energy_probs(energies, zenith = 0, sample = True):
     else:
         array = prob(energies)/np.sum(prob(energies))
 
-    return arra
+    return array
 
 
 def mei_hime_normed_continuous(zenith_angles, vert_depth = SNOLAB_DEPTH):
@@ -297,6 +298,29 @@ def generate_muons(how_many, outer_detector = OuterDetector(), gen_radius=0, gen
         muons[i] = Muon(zeniths[i], azimuths[i], energies_underground[i], (initial_x[i], initial_y[i], initial_z[i]))
 
     return muons
+
+def muons_per_square_meter(how_many, outer_detector, z_offset = 0, gen_radius = 0):
+    '''Returns an array of intersecting muons evenly distributed over the generator area at the specified concentration'''
+    
+    gen_offset = z_offset #outer_detector.height
+    
+    if gen_radius == 0:
+        gen_radius = np.tan(1)*((outer_detector.height/2) + gen_offset + outer_detector.height/2)\
+            + outer_detector.radius
+        
+    gen_area = np.pi*(gen_radius)**2 
+
+    n_muons = int(gen_area*how_many)
+
+    muons = generate_muons(n_muons, outer_detector, gen_radius, gen_offset)
+
+    remove_indices = []
+
+    for i in range(len(muons)):
+        if not hits_detector(muons[i], outer_detector):
+            remove_indices.append(i)
+    
+    return np.delete(muons, remove_indices, axis = 0)
 
 def intersection_points(muon, outer_detector = OuterDetector(), labels = True, tolerance = 0.001):
     ''' A function for analytically determining the intersection points of a muon with an outer detector cylinder.  '''
