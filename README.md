@@ -1,4 +1,4 @@
-# Muon Generation Files
+# muons
 
 ##  muon_functions.py
  This is a module for simulating muons passing through nEXO's outer detector (OD hereafter). It comprises a few classes, each with particular attributes and instance methods. While the tools within are specifically for determining intersection points, path lengths and fluxes for nEXO, they are written to be generalizeable for any cylindrical underground apparatus.
