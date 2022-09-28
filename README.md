@@ -184,6 +184,3 @@ def get_cherenkov(muon, outer_detector = OuterDetector(), photons_per_meter = Fa
 This function returns the Cherenkov yield of photons (per meter if `photons_per_meter = True`) and the angle at which they're emitted for a muon based on its path length through the OD. It automatically removes the path length through the cryostat and the cover gas. The function deployes the Frank Tamm Formula and the relativistic kinetic energy to calculate these values.
 
 **Returns** a numpy array: [\<number of photons>, \<angle of emission>]
-
-## generate_muons.py
-This is a simple python script that uses `muon_functions.py` to write an array of muons to a csv file. It pulls parameters from `muon_params.yaml`
