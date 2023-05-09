@@ -2,7 +2,7 @@
 
 __version__ = 2.2
 __author__ = 'Regan Ross'
-## Last Edited Sept 27, 2022
+## Last Edited May 9, 2023
 
 '''
 muon_functions.py
@@ -207,7 +207,6 @@ class Muon:
 
         return (cos_x, cos_y, cos_z)
 
-
     def __str__(self):
         '''returns a string of the particle'''
 
@@ -217,7 +216,7 @@ class Muon:
         initial = self.initial
         weight = 1
 
-        return '{} {} {} {} {} {} {} {}'.format(energy, initial[0], initial[1], initial[2], cos_x, cos_y, cos_z, weight)
+        return '{} {} {} {} {} {} {} {}'.format(energy, initial[0], initial[1], initial[2], cos_x, cos_y, -cos_z, weight)
 
 
 
@@ -336,7 +335,7 @@ def generate_muons(how_many, detector = OuterDetector(), gen_radius=0, gen_offse
     azimuths = np.random.random(size = how_many)*np.pi*2
 
     # Selecting Energies
-    surface_energy_range = np.linspace(6500, 100000, sampling_size)
+    surface_energy_range = np.linspace(5000, 100000, sampling_size)
     surface_energies = np.random.choice(surface_energy_range, p = gaisser_normed_discrete(surface_energy_range, 0), size = how_many)
 
     # Attenuate based on zenith angles
@@ -498,9 +497,25 @@ def intersecting_muons(how_many, detector = OuterDetector(), gen_radius=0, gen_o
 
     return np.array(muon_list)[:how_many]
 
+def non_intersecting_muons(how_many, detector = OuterDetector(), gen_radius=0, gen_offset=0) -> np.ndarray:
+    ''' Does the same as generate_muons, but returns only muons that do not intersect the provided outer detector'''
+
+    at_a_time = int(how_many/2)+1
+    muon_list = []
+
+    while len(muon_list) < how_many:
+        temp_muons = generate_muons(at_a_time, detector, gen_radius, gen_offset)
+        for mu in temp_muons:
+            if not hits_detector(mu, detector):
+                muon_list.append(mu)
+                mu.path_length = path_length(mu, detector, labels=False)
+
+    return np.array(muon_list)[:how_many]
+
 def hits_detector(muon, detector) -> bool:
     ''' Returns True if the muon intersects the detector, False otherwise'''
     return (type(intersection_points(muon, detector, labels= False)) is not bool)
+
 
 
 def path_length(muon, detector = OuterDetector(), labels=True, ignore_cover_gas=True, ignore_cryostat=True):
