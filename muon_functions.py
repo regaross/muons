@@ -2,11 +2,10 @@
 
 __version__ = 2.2
 __author__ = 'Regan Ross'
-## Last Edited May 9, 2023
+## Last Edited Sept 27, 2022
 
 '''
 muon_functions.py
-
 
 Contact:
 Regan Ross
@@ -21,12 +20,8 @@ A module for simulating muons underneath SNOLAB's overburden for nEXO's Outer De
 #################################################
 
 import numpy as np
-import time
-import string
 
 ### Seed for random number generation from system time
-SEED = int(time.time())
-np.random.seed(SEED)
 
 #################################################
 #                   CONSTANTS                   }
@@ -53,8 +48,8 @@ elementary_charge = 1.60218e-19        # [C]
 OD_RADIUS = 6.1722      # m
 OD_HEIGHT = 12.800      # m
 OD_CENTER = (0,0,0)     # m         defines coordinate system with respect to literal centre of OD
-OC_RADIUS = 2.770       # m
-OC_POSITION = (0,0,0)   # m         positions OC with respect to OD centre
+OC_RADIUS = 2.270       # m
+OC_POSITION = (0,0,0.40) # m         positions OC with respect to OD centre
 TPC_RADIUS = 0.575      # m         from the pre-conceptual design report
 TPC_HEIGHT = 0.625      # m
 
@@ -143,7 +138,7 @@ class Muon:
     charge = 1.60218e-19        # [C]
     
 
-    def __init__(self, zenith=0, azimuth=0, energy=SNOLAB_MU_E_AVG, initial=(0,0,0)) -> 'Muon':
+    def __init__(self, zenith=0, azimuth=0, energy=SNOLAB_MU_E_AVG, initial=(0,0,0), pos_neg = np.random.random() > 0.5) -> 'Muon':
         ''' A constructor for the muon. Defaults to vertical muon at average SNOLAB energy'''
 
         self.zenith = zenith
@@ -154,6 +149,12 @@ class Muon:
         self.path_length = 0
         self.impact_param = self.closest_approach((0,0,0))
         self.hits_cryostat = False
+        self.pos_neg = pos_neg
+
+        if pos_neg:
+            self.fluka_number = 10
+        else:
+            self.fluka_number = 11
 
 
     ### Instance Functions
@@ -208,15 +209,16 @@ class Muon:
         return (cos_x, cos_y, cos_z)
 
     def __str__(self):
-        '''returns a string of the particle'''
+        '''Returns a string of the particle fit for a phase space file for a FLUKA Source'''
 
         cos_x, cos_y, cos_z = self.direction_cosines()
 
         energy = self.energy
         initial = self.initial
         weight = 1
+        fnumber = self.fluka_number
 
-        return '{} {} {} {} {} {} {} {}'.format(energy, initial[0], initial[1], initial[2], cos_x, cos_y, -cos_z, weight)
+        return '{} {} {} {} {} {} {} {} {}'.format(fnumber, energy, initial[0], initial[1], initial[2], cos_x, cos_y, -cos_z, weight)
 
 
 
@@ -226,6 +228,9 @@ class Muon:
 #                                                }
 #################################################
 
+def set_seed(seed):
+    '''Sets the numpy random generation seed with a given seed'''
+    np.random.seed(seed)
 
 def mei_hime_intensity(zenith_angles, vert_depth = SNOLAB_DEPTH)-> np.ndarray:
     ''' Function from Mei & Hime's zenith angle intensity relation- exactly the same as Eqn. 3 from the paper.'''
@@ -294,7 +299,10 @@ def gaisser_normed_discrete(energies, zenith):
     # Normalize it for use as PDF
     return energy_array/np.sum(energy_array)
 
-def get_disk_radius(detector, gen_offset):
+def get_disk_radius(detector, gen_offset = 0):
+    if gen_offset == 0:
+        gen_offset = detector.height
+
     gen_radius = np.tan(1)*(detector.height + gen_offset) + detector.radius
     return gen_radius
 
@@ -497,6 +505,54 @@ def intersecting_muons(how_many, detector = OuterDetector(), gen_radius=0, gen_o
 
     return np.array(muon_list)[:how_many]
 
+def intersecting_muons_with_time(how_many, detector = OuterDetector(), gen_radius=0, gen_offset=0) -> tuple:
+    ''' Returns a tuple of an array with the intersecting muons and also the count of muons that had to be tested to produce the array'''
+
+    at_a_time = int(np.sqrt(how_many))
+    no_hits_count = 0
+    hits_count = 0
+
+    muon_list = []
+
+    while len(muon_list) < how_many:
+        temp_muons = generate_muons(at_a_time, detector, gen_radius, gen_offset)
+        for mu in temp_muons:
+            if hits_detector(mu, detector):
+                if hits_count == how_many:
+                    break
+                hits_count += 1
+                muon_list.append(mu)
+                mu.path_length = path_length(mu, detector, labels=False)
+            else:
+                no_hits_count += 1
+
+    total_muons = no_hits_count + hits_count
+    area = (10**4)*np.pi*get_disk_radius(detector, detector.height)**2 ## cm squared
+
+    seconds = (total_muons/area)/SNOLAB_MU_FLUX ## seconds
+    hours = seconds / 3600
+
+    return (np.array(muon_list)[:how_many], hours)
+
+def get_gen_area(detector = OuterDetector(), cm2 = False) -> float:
+    gen_radius = get_disk_radius(detector)
+    area = np.pi*gen_radius**2
+    if not cm2:
+        return area # m^2
+    else:
+        return area*1e4
+
+def muons_from_time(hours, detector = OuterDetector(), intersecting = True, gen_radius=0, gen_offset=0) -> tuple:
+    ''' Returns a tuple of an array with the intersecting muons and also the count of muons that had to be tested to produce the array'''
+
+    number_of_muons = int(hours*3600*SNOLAB_MU_FLUX*get_gen_area(detector, cm2=True)) + 1 ## plus one for conservative estimation
+    muons = generate_muons(number_of_muons, detector)
+    if intersecting:
+        muon_list = [muon for muon in muons if hits_detector(muon, detector)]
+        return muon_list
+    else:
+        return muons
+    
 def non_intersecting_muons(how_many, detector = OuterDetector(), gen_radius=0, gen_offset=0) -> np.ndarray:
     ''' Does the same as generate_muons, but returns only muons that do not intersect the provided outer detector'''
 
@@ -515,7 +571,6 @@ def non_intersecting_muons(how_many, detector = OuterDetector(), gen_radius=0, g
 def hits_detector(muon, detector) -> bool:
     ''' Returns True if the muon intersects the detector, False otherwise'''
     return (type(intersection_points(muon, detector, labels= False)) is not bool)
-
 
 
 def path_length(muon, detector = OuterDetector(), labels=True, ignore_cover_gas=True, ignore_cryostat=True):
@@ -548,8 +603,6 @@ def path_length(muon, detector = OuterDetector(), labels=True, ignore_cover_gas=
     else:
         return False
 
-    
-    
 def path_through_covergas(muon, outer_detector) -> float:
     ''' Returns the pathlength of the muon through the outer_detector cover gas layer'''
     
@@ -579,7 +632,6 @@ def path_through_covergas(muon, outer_detector) -> float:
 
     return path_through_covergas
 
-
 def path_through_cryostat(muon, outer_detector) -> float:
     ''' Returns the pathlength through the Outer Detector without the contribution of the cryostat'''
 
@@ -592,9 +644,9 @@ def path_through_cryostat(muon, outer_detector) -> float:
     x0, y0, z0 = muon.initial
     ocx, ocy, ocz = oc.position
 
-    A_x, B_x, C_x = ((mx**2),(2*(mx*x0 - mx*ocx)),(x0**2 + ocx**2 - x0*ocx))
-    A_y, B_y, C_y = ((my**2),(2*(my*y0 - my*ocy)),(y0**2 + ocy**2 - y0*ocy))
-    A_z, B_z, C_z = ((mz**2),(2*(mz*z0 - mz*ocz)),(z0**2 + ocz**2 - z0*ocz))
+    A_x, B_x, C_x = ((mx**2),(2*mx*(x0 - ocx)),(x0 - ocx)**2)
+    A_y, B_y, C_y = ((my**2),(2*my*(y0 - ocy)),(y0 - ocy)**2)
+    A_z, B_z, C_z = ((mz**2),(2*mz*(z0 - ocz)),(z0 - ocz)**2)
 
     A = A_x + A_y + A_z
     B = B_x + B_y + B_z
@@ -727,3 +779,46 @@ def muons_to_array(muons):
 
 
     return new_array
+
+def plot_muon_counts_hist(days, od = OuterDetector(), with_oc = True, oc = OuterCryostat(), with_tpc = True, tpc = OuterDetector(0.6, 1.35)):
+    ''' Plots overlapping histograms of counts of muons hitting the OD, Outer Cryostat and TPC.'''
+    import matplotlib.pyplot as plt
+
+    od_counts = []
+    oc_counts = []
+    tpc_counts = []
+    
+    for day in range(days):
+        muons = muons_from_time(24)
+        od_count = 0
+        oc_count = 0
+        tpc_count = 0
+
+        for muon in muons:
+            if hits_detector(muon, od):
+                od_count += 1
+            
+            if path_through_cryostat(muon, od) > 0:
+                oc_count += 1
+
+            if hits_detector(muon, tpc):
+                tpc_count += 1
+
+        od_counts.append(od_count)
+        oc_counts.append(oc_count)
+        tpc_counts.append(tpc_count)
+
+    od_counts = np.array(od_counts)
+    oc_counts = np.array(oc_counts)
+    tpc_counts = np.array(tpc_counts)
+
+    od_hist = plt.hist(od_counts, histtype = 'stepfilled', bins = (od_counts.max() - od_counts.min()), label = r'OD $\mu = $ ' + str(np.mean(od_counts))[:4], density=True, alpha = 0.7)
+    oc_hist = plt.hist(oc_counts, histtype = 'stepfilled', bins = (oc_counts.max() - oc_counts.min()), label = r'OC $\mu = $ ' + str(np.mean(oc_counts))[:4], density=True, alpha = 0.7)
+    tpc_hist = plt.hist(tpc_counts, histtype = 'stepfilled', bins = (tpc_counts.max() - tpc_counts.min()), label = r'TPC $\mu = $ ' + str(np.mean(tpc_counts))[:4], density=True, alpha = 0.7)
+
+    years = days/365
+
+    plt.xlabel('Muons counted per day')
+    plt.ylabel('Fraction of Runtime')
+    plt.title('Muon counts in detector for ' + str(years) + ' years')
+    plt.legend()
